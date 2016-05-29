@@ -43,7 +43,7 @@ def test_run(*targs):
                     print 'True for %s' % repr(args)
                 else:
                     print 'False for %s' % repr(args)
-        return wrapper
+        return wrapper()
     return _test_run
 
         
