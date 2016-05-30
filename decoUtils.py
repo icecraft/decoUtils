@@ -14,8 +14,8 @@ import pprint
 
 
 __all__ = ['immutableattr', 'safe_run', 'safe_run_dump', 'trace',
-           'lineTrace', 'dump_args', 'delayRetry', 'logWrap', 'methodWrap',
-           'test_run', 'timecal', 'profileit']
+           'dump_args', 'delayRetry', 'logWrap', 'methodWrap',
+           'test_run', 'timecal', 'profileit', 'lineDump', 'btDump']
 
 
 def _backtrace_f(f):
@@ -112,47 +112,15 @@ def trace(func):
     return wrapper
 
 
-def lineTrace(f):
-    """ copy this function from  
-https://wiki.python.org/moin/PythonDecoratorLibrary#Line_Tracing_Individual_Functions
- """
-    save_trace = []
-    
-    def globaltrace(frame, why, arg):
-        if why == "call":
-            return localtrace
-        return None
-
-    def localtrace(frame, why, arg):
-        if why == "line":
-            # record the file name and line number of every trace
-            filename = frame.f_code.co_filename
-            lineno = frame.f_lineno
-
-            bname = os.path.basename(filename)
-            print "{}({}): {}".format(bname,
-                                      lineno,
-                                      linecache.getline(filename, lineno)),
-        return localtrace
-    
-    @wraps(f)
-    def _f(*args, **kwds):
-        save_trace.append(sys.gettrace())
-        sys.settrace(globaltrace)
-        result = f(*args, **kwds)
-        sys.settrace(save_trace[-1])
-        return result
-
-    return _f
-
-
 def _filter_frame_dict(ddata):
-    from inspect import isfunction, ismethod, ismodule
+    from inspect import isfunction, ismethod, ismodule, isclass
 
     no_private = lambda key: not key.startswith('_')  
     no_function = lambda key: not isfunction(ddata[key])
     no_method = lambda key: not ismethod(ddata[key])
-    no_module = lambda key: not ismodule(key)
+    no_module = lambda key: not ismodule(ddata[key])
+    no_class = lambda key: not isclass(ddata[key])
+    
     no_ipython = lambda key: (key != 'In') and ( key != 'Out') \
                          and (key != 'exit') and (key !='quit')  
     
@@ -168,60 +136,84 @@ def _diff_dict(new, old):
                   if new[key] != old[key]}
     _diff_dict.update(_newkey_dict)
     return _diff_dict
+
+
+def _lineDumpFunc():
+    def _print(ddata):
+        if len(ddata) is 0:
+            return
+        pp.pprint(ddata)
+
+    _frame_dict = []
+    pp = pprint.PrettyPrinter(indent=4)
+    
+    def _func(frame):
+        f_locals, f_globals = _filter_frame_dict(frame.f_locals), _filter_frame_dict(frame.f_globals)
+
+        if len(_frame_dict) == 0:
+            pp.pprint(f_locals)
+            pp.pprint(f_globals)
+        else:
+            _print(_diff_dict(f_globals, _frame_dict.pop()))
+            _print(_diff_dict(f_locals, _frame_dict.pop()))
+                
+        _frame_dict.append(f_locals)
+        _frame_dict.append(f_globals)
+    return _func
+
+
+def btDump(procFrameFunc=_lineDumpFunc(), verbose=False):
+    def _detail_dump(f):
+        while f:
+            if verbose: procFrameFunc(f)
+            else: print f.f_code
+            f = f.f_back
+        
+    def decorated_func(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            f = sys._getframe()
+            _detail_dump(f)
+            return func(*args, **kwargs)    
+        return wrapper
+    return decorated_func        
     
 
-def lineDump(f):
+def lineDump(procFrameFunc=_lineDumpFunc()):
     """ copy this function from  
 https://wiki.python.org/moin/PythonDecoratorLibrary#Line_Tracing_Individual_Functions
  """
     save_trace = []
-    pp = pprint.PrettyPrinter(indent=4)
-    _frame_dict = []
     
     def globaltrace(frame, why, arg):
         if why == "call":
             return _dump
         return None
 
-    def _print(ddata):
-        if len(ddata) is 0:
-            return
-        pp.pprint(ddata)
-        
     def _dump(frame, why, arg):
         if why == "line":
             # record the file name and line number of every trace
             filename = frame.f_code.co_filename
             lineno = frame.f_lineno
             bname = os.path.basename(filename)
-            """
+            
             print "{}({}): {}".format(bname,
                                       lineno,
-                                      linecache.getline(filename, lineno))"""
-            
-            f_locals, f_globals = _filter_frame_dict(frame.f_locals), _filter_frame_dict(frame.f_globals)
-
-            if len(_frame_dict) == 0:
-                pp.pprint(f_locals)
-                pp.pprint(f_globals)
-            else:
-                _print(_diff_dict(f_globals, _frame_dict.pop()))
-                _print(_diff_dict(f_locals, _frame_dict.pop()))
-                
-            _frame_dict.append(f_locals)
-            _frame_dict.append(f_globals)
-                
+                                      linecache.getline(filename, lineno))
+            procFrameFunc(frame)
         return _dump
     
-    @wraps(f)
-    def _f(*args, **kwds):
-        save_trace.append(sys.gettrace())
-        sys.settrace(globaltrace)
-        result = f(*args, **kwds)
-        sys.settrace(save_trace[-1])
-        return result
+    def wrapper(f):
+        @wraps(f)
+        def _f(*args, **kwds):
+            save_trace.append(sys.gettrace())
+            sys.settrace(globaltrace)
+            result = f(*args, **kwds)
+            sys.settrace(save_trace[-1])
+            return result
 
-    return _f
+        return _f
+    return wrapper
 
 
 def dump_args(func):
@@ -229,7 +221,6 @@ def dump_args(func):
 a function before calling it and this code was copy from 
 https://wiki.python.org/moin/PythonDecoratorLibrary#Line_Tracing_Individual_Functions
 """
-    
     argnames = func.func_code.co_varnames[:func.func_code.co_argcount]
     fname = func.func_name
     
