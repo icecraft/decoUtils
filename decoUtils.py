@@ -9,11 +9,13 @@ import time
 import math
 import logging
 import inspect
+import cProfile
+import pprint
 
 
 __all__ = ['immutableattr', 'safe_run', 'safe_run_dump', 'trace',
            'lineTrace', 'dump_args', 'delayRetry', 'logWrap', 'methodWrap',
-           'test_run', 'timecal']
+           'test_run', 'timecal', 'profileit']
 
 
 def _backtrace_f(f):
@@ -21,7 +23,17 @@ def _backtrace_f(f):
         print f, f.f_code
         f = f.f_back
 
-        
+
+def profileit(func):
+    def wrapper(*args, **kwargs):
+        datafn = func.__name__ + ".profile"  # Name the data file sensibly
+        prof = cProfile.Profile()
+        retval = prof.runcall(func, *args, **kwargs)
+        prof.dump_stats(datafn)
+        return retval
+    return wrapper
+
+
 def timecal(func):
     @wraps(func)
     def wrapper(*args, **kwargs):
@@ -84,13 +96,16 @@ def safe_run_dump(func):
 
 
 def trace(func):
+    save_trace = []
+    
     @wraps(func)
     def wrapper(*args, **kwargs):
         try:
+            save_trace.append(sys.gettrace())
             import pdb
             pdb.set_trace()
             res = func(*args, **kwargs)
-            sys.settrace(None)
+            sys.settrace(save_trace[-1])
             return res
         except:
             sys.settrace(None)
@@ -101,7 +116,8 @@ def lineTrace(f):
     """ copy this function from  
 https://wiki.python.org/moin/PythonDecoratorLibrary#Line_Tracing_Individual_Functions
  """
-
+    save_trace = []
+    
     def globaltrace(frame, why, arg):
         if why == "call":
             return localtrace
@@ -121,9 +137,88 @@ https://wiki.python.org/moin/PythonDecoratorLibrary#Line_Tracing_Individual_Func
     
     @wraps(f)
     def _f(*args, **kwds):
+        save_trace.append(sys.gettrace())
         sys.settrace(globaltrace)
         result = f(*args, **kwds)
-        sys.settrace(None)
+        sys.settrace(save_trace[-1])
+        return result
+
+    return _f
+
+
+def _filter_frame_dict(ddata):
+    from inspect import isfunction, ismethod, ismodule
+
+    no_private = lambda key: not key.startswith('_')  
+    no_function = lambda key: not isfunction(ddata[key])
+    no_method = lambda key: not ismethod(ddata[key])
+    no_module = lambda key: not ismodule(key)
+    no_ipython = lambda key: (key != 'In') and ( key != 'Out') \
+                         and (key != 'exit') and (key !='quit')  
+    
+    filter_list = [no_private, no_function, no_method, no_module, no_ipython]
+    return {key: ddata[key] for key in
+            reduce(lambda r, x: filter(x, r), filter_list, ddata)}
+
+
+def _diff_dict(new, old):
+
+    _newkey_dict = {key: new[key] for key in (new.viewkeys() - old.viewkeys())}
+    _diff_dict = {key: new[key] for key in (new.viewkeys() & old.viewkeys())
+                  if new[key] != old[key]}
+    _diff_dict.update(_newkey_dict)
+    return _diff_dict
+    
+
+def lineDump(f):
+    """ copy this function from  
+https://wiki.python.org/moin/PythonDecoratorLibrary#Line_Tracing_Individual_Functions
+ """
+    save_trace = []
+    pp = pprint.PrettyPrinter(indent=4)
+    _frame_dict = []
+    
+    def globaltrace(frame, why, arg):
+        if why == "call":
+            return _dump
+        return None
+
+    def _print(ddata):
+        if len(ddata) is 0:
+            return
+        pp.pprint(ddata)
+        
+    def _dump(frame, why, arg):
+        if why == "line":
+            # record the file name and line number of every trace
+            filename = frame.f_code.co_filename
+            lineno = frame.f_lineno
+            bname = os.path.basename(filename)
+            """
+            print "{}({}): {}".format(bname,
+                                      lineno,
+                                      linecache.getline(filename, lineno))"""
+            
+            f_locals, f_globals = _filter_frame_dict(frame.f_locals), _filter_frame_dict(frame.f_globals)
+
+            if len(_frame_dict) == 0:
+                pp.pprint(f_locals)
+                pp.pprint(f_globals)
+            else:
+                _print(_diff_dict(f_globals, _frame_dict.pop()))
+                _print(_diff_dict(f_locals, _frame_dict.pop()))
+                
+            _frame_dict.append(f_locals)
+            _frame_dict.append(f_globals)
+                
+        return _dump
+    
+    @wraps(f)
+    def _f(*args, **kwds):
+        save_trace.append(sys.gettrace())
+        sys.settrace(globaltrace)
+        result = f(*args, **kwds)
+        sys.settrace(save_trace[-1])
         return result
 
     return _f
