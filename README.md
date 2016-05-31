@@ -7,6 +7,7 @@ collection of my python decorate code
 * btDump: dump 出当前函数的调用栈.可以根据参数决定是否 dump 出每个 frame 的 f_locals、f_globals  #done
 * profile 装饰器    # Done
 * color output 装饰器   # noNeed
+* 当发生异常时，自动进入 pdb 
 
 ## 待考虑问题
 * 如何用装饰器或者从 aop 面向切面编程观点出发，实现一个具有 mock anything 的工具

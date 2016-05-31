@@ -11,6 +11,7 @@ import logging
 import inspect
 import cProfile
 import pprint
+import miscUtils
 
 
 __all__ = ['immutableattr', 'safe_run', 'safe_run_dump', 'trace',
@@ -95,6 +96,22 @@ def safe_run_dump(func):
     return wrapper
 
 
+def trace_when_error(func):
+    save_trace = []
+    
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            res = func(*args, **kwargs)
+            return res
+        except:
+            save_trace.append(sys.gettrace())
+            import pdb
+            pdb.set_trace()
+            sys.settrace(save_trace[-1])
+    return wrapper
+
+
 def trace(func):
     save_trace = []
     
@@ -108,7 +125,7 @@ def trace(func):
             sys.settrace(save_trace[-1])
             return res
         except:
-            sys.settrace(None)
+            sys.settrace(save_trace[-1])
     return wrapper
 
 
@@ -120,11 +137,14 @@ def _filter_frame_dict(ddata):
     no_method = lambda key: not ismethod(ddata[key])
     no_module = lambda key: not ismodule(ddata[key])
     no_class = lambda key: not isclass(ddata[key])
+    no_type = lambda key: not (type(ddata[key]) == type)
     
     no_ipython = lambda key: (key != 'In') and ( key != 'Out') \
                          and (key != 'exit') and (key !='quit')  
     
-    filter_list = [no_private, no_function, no_method, no_module, no_ipython]
+    filter_list = [no_private, no_function, no_method, no_module,
+                   no_ipython, no_type]
+    
     return {key: ddata[key] for key in
             reduce(lambda r, x: filter(x, r), filter_list, ddata)}
 
@@ -142,7 +162,7 @@ def _lineDumpFunc():
     def _print(ddata):
         if len(ddata) is 0:
             return
-        pp.pprint(ddata)
+        miscUtils.safe_do_with_info(pp.pprint, ddata)
 
     _frame_dict = []
     pp = pprint.PrettyPrinter(indent=4)
@@ -151,8 +171,9 @@ def _lineDumpFunc():
         f_locals, f_globals = _filter_frame_dict(frame.f_locals), _filter_frame_dict(frame.f_globals)
 
         if len(_frame_dict) == 0:
-            pp.pprint(f_locals)
-            pp.pprint(f_globals)
+            # make it safe!
+            _print(f_locals)
+            _print(f_globals)
         else:
             _print(_diff_dict(f_globals, _frame_dict.pop()))
             _print(_diff_dict(f_locals, _frame_dict.pop()))
