@@ -16,7 +16,8 @@ import miscUtils
 
 __all__ = ['immutableattr', 'safe_run', 'safe_run_dump', 'trace',
            'dump_args', 'delayRetry', 'logWrap', 'methodWrap',
-           'test_run', 'timecal', 'profileit', 'lineDump', 'btDump']
+           'test_run', 'timecal', 'profileit', 'lineDump', 'btDump',
+           'memorized', 'memorized_timeout']
 
 
 def _backtrace_f(f):
@@ -33,6 +34,49 @@ def profileit(func):
         prof.dump_stats(datafn)
         return retval
     return wrapper
+
+
+def memorized(func):
+    save_res = {}
+
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        if len(kwargs) != 0:
+            print 'memorized decorator can not be used for \
+func %s has kwargs argument' % repr(func)
+            return func(*args, **kwargs)
+        else:
+            tuple_name = (func,) + args 
+            if tuple_name in save_res:
+                return save_res[tuple_name]
+            else:
+                save_res[tuple_name] = value = func(*args, **kwargs)
+                return value
+    return wrapper
+
+
+def memorized_timeout(timeout):
+    def memorized(func):
+        save_res = {}
+
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            if len(kwargs) != 0:
+                print 'memorized decorator can not be used to decorate \
+%s with kwargs argument' % repr(func)
+                return func(*args, **kwargs)
+            else:
+                tuple_name = (func, ) + args
+                if tuple_name in save_res and save_res[tuple_name]['timeout'] < time.time():
+                    return save_res[tuple_name]['res']
+                else:
+                    res = {}
+                    res['res'] = value = func(*args, **kwargs)
+                    res['timeout'] = time.time() + timeout
+                    save_res[tuple_name] = res
+                    return value
+        return wrapper
+    return memorized
 
 
 def timecal(func):

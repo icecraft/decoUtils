@@ -8,6 +8,9 @@ collection of my python decorate code
 * profile 装饰器    # Done
 * color output 装饰器   # noNeed
 * 当发生异常时，自动进入 pdb 
+* memorized 装饰器  # Done
+# memorized_timeout 装饰器  # Done
+
 
 ## 待考虑问题
 * 如何用装饰器或者从 aop 面向切面编程观点出发，实现一个具有 mock anything 的工具
