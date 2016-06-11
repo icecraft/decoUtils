@@ -36,6 +36,33 @@ def profileit(func):
     return wrapper
 
 
+"""
+def fib(n, _memo={0:1, 1:1}):
+    if n in _memo:
+        return _memo[n]
+    else:
+        _memo[n] = fib(n-1) + fib(n-2)
+        return _memo[n]
+以上的写法也可以达到 memorized 效果, function object 还是有些不了解的
+"""
+
+
+"""
+def fib(n):
+    if n in fib.cache:
+        print "found fib.cache[%d] = %d: " %(n, fib.cache[n])
+        return fib.cache[n]
+    else:
+        print "fib.cache[%d] = fib(%d) + fib(%d)" % (n, n-1, n-2)
+        fib.cache[n] = fib(n-1) + fib(n-2)
+        print "modified fib.cache: ", fib.cache
+        return fib.cache[n]
+
+fib.cache = {0:0, 1:1}  # 用 fib.func_dict  存储数值
+# it is not cute
+"""
+
+
 def memorized(func):
     save_res = {}
 
@@ -66,8 +93,8 @@ def memorized_timeout(timeout):
 %s with kwargs argument' % repr(func)
                 return func(*args, **kwargs)
             else:
-                tuple_name = (func, ) + args
-                if tuple_name in save_res and save_res[tuple_name]['timeout'] < time.time():
+                tuple_name = hash((func, ) + args)
+                if tuple_name in save_res and save_res[tuple_name]['timeout'] > time.time():
                     return save_res[tuple_name]['res']
                 else:
                     res = {}
