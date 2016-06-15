@@ -15,3 +15,5 @@ def safe_do_with_info(func, *args, **kwargs):
         print func
 
         
+
+    

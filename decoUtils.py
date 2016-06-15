@@ -12,7 +12,7 @@ import inspect
 import cProfile
 import pprint
 import miscUtils
-
+from threading import Lock
 
 __all__ = ['immutableattr', 'safe_run', 'safe_run_dump', 'trace',
            'dump_args', 'delayRetry', 'logWrap', 'methodWrap',
@@ -33,6 +33,82 @@ def profileit(func):
         retval = prof.runcall(func, *args, **kwargs)
         prof.dump_stats(datafn)
         return retval
+    return wrapper
+
+
+# 重试若干次，如果还是失败。则直接 return 0，让 rq 清理这个任务
+# todo: 如果那样还是失败，则 log 出来
+# Attention: 暂时用不了，因为不知道如何将一个失败的任务塞到 rq 队列中。以及如何将错误日志 log 出来 
+def redis_retry(tries=3):
+    def _redis_retry(func):
+        try_times = [tries]
+        
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            if try_times[-1] > 0:
+                try_times[-1] -= 1
+                return func(*args, **kwargs)
+            else:
+                return 0
+        return wrapper
+    return _redis_retry
+
+
+def synchronized(lock):
+    '''Synchronization decorator. copy from
+https://wiki.python.org/moin/PythonDecoratorLibrary'''
+    
+    def wrap(f):
+        @wraps(f)
+        def new_function(*args, **kw):
+            lock.acquire()
+            try:
+                return f(*args, **kw)
+            finally:
+                lock.release()
+        return new_function
+    return wrap
+
+
+def simpleJobQueue(func):
+    # 调用该函数的函数将不会获得有效的返回值
+    # 等于将这个函数转化成一个简陋的 job Queue，
+    # 每次调用这个函数都是往工作队列中塞任务，且运行任务队列中已有的任务
+    queue = [[]]
+    queueAccessLock = Lock()
+    workLock = Lock()
+    
+    @synchronized(queueAccessLock)
+    def _get_queue_data():
+        data, queue[-1] = queue[-1], []
+        return data
+    
+    @synchronized(queueAccessLock)
+    def _update_queue_data(*args, **kwargs):
+        queue[-1].append((args, kwargs))  # 有问题
+        return
+
+    @synchronized(queueAccessLock)
+    def _pop_queue():
+        return queue[-1].pop()
+
+    def _iter_queue_data():
+        while 1:
+            try:
+                yield _pop_queue()
+            except IndexError:
+                raise StopIteration
+    
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        _update_queue_data(*args, **kwargs)
+        if workLock.acquire(False) is False:
+            return
+        try:  # if 语句中已经获取锁，所以要在 finally 中释放
+            for jobargs in _iter_queue_data():
+                func(*jobargs[0], **jobargs[1])
+        finally:
+            workLock.release()
     return wrapper
 
 
@@ -63,6 +139,10 @@ fib.cache = {0:0, 1:1}  # 用 fib.func_dict  存储数值
 """
 
 
+def _args_have_dict(*args):
+    return any(map(lambda x: isinstance(x, dict), args))
+        
+
 def memorized(func):
     save_res = {}
 
@@ -72,8 +152,11 @@ def memorized(func):
             print 'memorized decorator can not be used for \
 func %s has kwargs argument' % repr(func)
             return func(*args, **kwargs)
+        elif _args_have_dict(*args):
+            print "*args can not  dict type argument"
+            return func(*args, **kwargs)
         else:
-            tuple_name = (func,) + args 
+            tuple_name = hash((func,) + args)
             if tuple_name in save_res:
                 return save_res[tuple_name]
             else:
@@ -91,6 +174,9 @@ def memorized_timeout(timeout):
             if len(kwargs) != 0:
                 print 'memorized decorator can not be used to decorate \
 %s with kwargs argument' % repr(func)
+                return func(*args, **kwargs)
+            elif _args_have_dict(*args):
+                print "*args can not  dict type argument"
                 return func(*args, **kwargs)
             else:
                 tuple_name = hash((func, ) + args)
