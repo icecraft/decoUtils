@@ -4,6 +4,9 @@ collection of my python decorate code
 
 ## 待增加功能
 1. lineDump: dump 出 frame 对象的 f_locals、f_globals # 第一次dump 出所有的值，后续的 dump 出变化的值 #done
+   * dump 出函数体内调用的其他函数
+   * lineDump: 默认的处理函数不能进入 try: except 块内  
+
 2. btDump: dump 出当前函数的调用栈.可以根据参数决定是否 dump 出每个 frame 的 f_locals、f_globals  #done
 3. profile 装饰器    # Done
 4. color output 装饰器   # noNeed
@@ -19,6 +22,11 @@ collection of my python decorate code
 1. 如何用装饰器或者从 aop 面向切面编程观点出发，实现一个具有 mock anything 的工具
 2. 如何用装饰器实现 event-driven programming (参考python 库 blinker )
 3. 考虑待增加功能 9 中所遇到的问题，考虑用 blinker 等事件驱动的方式解决
+
+
+## 待修改的问题
+1. dump_args 无法打印 *args, **kwargs 参数、dump_args 不能和 dump_res 配合使用  #done
+
 
 
 

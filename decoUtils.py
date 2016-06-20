@@ -13,9 +13,11 @@ import cProfile
 import pprint
 import miscUtils
 from threading import Lock
+import cPickle
+
 
 __all__ = ['immutableattr', 'safe_run', 'safe_run_dump', 'trace',
-           'dump_args', 'delayRetry', 'logWrap', 'methodWrap',
+           'dump_args', 'dump_res', 'delayRetry', 'invokerLog', 'methodWrap',
            'test_run', 'timecal', 'profileit', 'lineDump', 'btDump',
            'memorized', 'memorized_timeout']
 
@@ -143,51 +145,47 @@ def _args_have_dict(*args):
     return any(map(lambda x: isinstance(x, dict), args))
         
 
+def _memorized_args_key(func, *args, **kwargs):
+    arg_names = func.func_code.co_varnames
+    arg_count = func.func_code.co_argcount
+    
+    arg_dict = {}
+    for i, arg in enumerate(args[:arg_count]):
+        arg_dict[arg_names[i]] = args[i]
+    arg_dict.update({"*args": args[arg_count:]})
+    arg_dict.update(**kwargs)
+    return cPickle.dumps(arg_dict)
+
+
 def memorized(func):
     save_res = {}
 
     @wraps(func)
     def wrapper(*args, **kwargs):
-        if len(kwargs) != 0:
-            print 'memorized decorator can not be used for \
-func %s has kwargs argument' % repr(func)
-            return func(*args, **kwargs)
-        elif _args_have_dict(*args):
-            print "*args can not  dict type argument"
-            return func(*args, **kwargs)
+        tuple_name = _memorized_args_key(func, *args, **kwargs)
+        if tuple_name in save_res:
+            return save_res[tuple_name]
         else:
-            tuple_name = hash((func,) + args)
-            if tuple_name in save_res:
-                return save_res[tuple_name]
-            else:
-                save_res[tuple_name] = value = func(*args, **kwargs)
-                return value
+            save_res[tuple_name] = value = func(*args, **kwargs)
+            return value
     return wrapper
 
 
 def memorized_timeout(timeout):
     def memorized(func):
         save_res = {}
-
+        
         @wraps(func)
         def wrapper(*args, **kwargs):
-            if len(kwargs) != 0:
-                print 'memorized decorator can not be used to decorate \
-%s with kwargs argument' % repr(func)
-                return func(*args, **kwargs)
-            elif _args_have_dict(*args):
-                print "*args can not  dict type argument"
-                return func(*args, **kwargs)
+            tuple_name = _memorized_args_key(func, *args, **kwargs)
+            if tuple_name in save_res and save_res[tuple_name]['timeout'] > time.time():
+                return save_res[tuple_name]['res']
             else:
-                tuple_name = hash((func, ) + args)
-                if tuple_name in save_res and save_res[tuple_name]['timeout'] > time.time():
-                    return save_res[tuple_name]['res']
-                else:
-                    res = {}
-                    res['res'] = value = func(*args, **kwargs)
-                    res['timeout'] = time.time() + timeout
-                    save_res[tuple_name] = res
-                    return value
+                res = {}
+                res['res'] = value = func(*args, **kwargs)
+                res['timeout'] = time.time() + timeout
+                save_res[tuple_name] = res
+                return value
         return wrapper
     return memorized
 
@@ -327,14 +325,13 @@ def _lineDumpFunc():
     def _func(frame):
         f_locals, f_globals = _filter_frame_dict(frame.f_locals), _filter_frame_dict(frame.f_globals)
 
-        if len(_frame_dict) == 0:
-            # make it safe!
-            _print(f_locals)
-            _print(f_globals)
-        else:
+        try:
             _print(_diff_dict(f_globals, _frame_dict.pop()))
             _print(_diff_dict(f_locals, _frame_dict.pop()))
-                
+        except:
+            _print(f_locals)
+            _print(f_globals)
+            
         _frame_dict.append(f_locals)
         _frame_dict.append(f_globals)
     return _func
@@ -343,8 +340,10 @@ def _lineDumpFunc():
 def btDump(procFrameFunc=_lineDumpFunc(), verbose=False):
     def _detail_dump(f):
         while f:
-            if verbose: procFrameFunc(f)
-            else: print f.f_code
+            if verbose:
+                procFrameFunc(f)
+            else:
+                print f.f_code
             f = f.f_back
         
     def decorated_func(func):
@@ -362,14 +361,18 @@ def lineDump(procFrameFunc=_lineDumpFunc()):
 https://wiki.python.org/moin/PythonDecoratorLibrary#Line_Tracing_Individual_Functions
  """
     save_trace = []
+    func_obj = []
     
     def globaltrace(frame, why, arg):
         if why == "call":
             return _dump
         return None
 
+    def _in_wrapfunc(frame, func):
+        return id(frame.f_code.co_code) == id(func.func_code.co_code)
+    
     def _dump(frame, why, arg):
-        if why == "line":
+        if why == "line" and _in_wrapfunc(frame, func_obj[0]):
             # record the file name and line number of every trace
             filename = frame.f_code.co_filename
             lineno = frame.f_lineno
@@ -379,9 +382,12 @@ https://wiki.python.org/moin/PythonDecoratorLibrary#Line_Tracing_Individual_Func
                                       lineno,
                                       linecache.getline(filename, lineno))
             procFrameFunc(frame)
+             
         return _dump
     
     def wrapper(f):
+        func_obj.append(f)
+        
         @wraps(f)
         def _f(*args, **kwds):
             save_trace.append(sys.gettrace())
@@ -404,11 +410,25 @@ https://wiki.python.org/moin/PythonDecoratorLibrary#Line_Tracing_Individual_Func
     
     @wraps(func)
     def wrapper(*args, **kwargs):
+        print args, kwargs
         print fname, ":", ', '.join(
             '%s=%r' % entry
-            for entry in zip(argnames, args) + kwargs.items())
+            for entry in zip(argnames, args) +
+            [('*args', list(args[func.func_code.co_argcount:]))] +
+            kwargs.items())
+        
         return func(*args, **kwargs)
 
+    return wrapper
+
+
+def dump_res(func):
+    # 打印出函数的运行结果
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        res = func(*args, **kwargs)
+        print func.func_name, ":", "result is :", res
+        return res
     return wrapper
 
 
@@ -449,7 +469,7 @@ def delayRetry(tries, delay=3, backoff=2, defaultValue=None):
     return deco_retry
 
 
-def logWrap(func):
+def invokerLog(func):
     @wraps(func)
     def wrap(*args, **kwargs):
         logging.error('now enter')
@@ -460,7 +480,7 @@ def logWrap(func):
 
 
 class CustomAttr:
-    def __init__(self, obj, wrapFunc=logWrap):
+    def __init__(self, obj, wrapFunc=invokerLog):
         self.attr = "a custom function attribute"
         self.obj = obj
         self.wrapFunc = wrapFunc
@@ -488,12 +508,17 @@ def methodWrap(wrapFunc):
     return decorator
 
     
-@methodWrap(logWrap)
-class B(object):
-    def __init__(self, x, y):
-        self.x = x
-        self.y = y
+# decos
 
-    def ad1(self, x):
-        return x + 1
+def inc_one(func):
+    # 等于是增长函数调用链条
+    @wraps
+    def wrapper(*args, **kwargs):
+        res = func(*args, **kwargs)
+        return res + 1
+    return wrapper
+
+
+
+    
 
