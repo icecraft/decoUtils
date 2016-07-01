@@ -14,10 +14,12 @@ import pprint
 import miscUtils
 from threading import Lock
 import cPickle
+import copy
 
 
 __all__ = ['immutableattr', 'safe_run', 'safe_run_dump', 'trace',
-           'dump_args', 'dump_res', 'delayRetry', 'invokerLog', 'methodWrap',
+           'dump_args', 'dump_res', 'fronzen_args', 'delayRetry', 'invokerLog',
+           'methodWrap', 'except_dump',
            'test_run', 'timecal', 'profileit', 'lineDump', 'btDump',
            'memorized', 'memorized_timeout']
 
@@ -26,6 +28,21 @@ def _backtrace_f(f):
     while f:
         print f, f.f_code
         f = f.f_back
+
+        
+def except_dump(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            exc_type, exc_value, exc_traceback = sys.exc_info()
+            lines = traceback.format_exception(exc_type, exc_value, exc_traceback)
+            print ''.join('!! ' + line for line in lines)
+            _backtrace_f(sys._getframe())
+            print func, args, kwargs
+            raise e
+    return wrapper
 
 
 def profileit(func):
@@ -512,13 +529,56 @@ def methodWrap(wrapFunc):
 
 def inc_one(func):
     # 等于是增长函数调用链条
-    @wraps
+    @wraps(func)
     def wrapper(*args, **kwargs):
         res = func(*args, **kwargs)
         return res + 1
     return wrapper
 
 
+# before、after 装饰器可以用于测试用(测试环境的xx，修改测试参数) 
 
+def before(func):
+    # 等于是增长函数调用链条
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        # do something
+        res = func(*args, **kwargs)
+        return res 
+    return wrapper
+
+
+def after(func):
+    # 等于是增长函数调用链条
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        res = func(*args, **kwargs)
+        # do something
+        return res
+    return wrapper
+
+
+# 天然的几个切面：1，参数 2，返回值 
+
+
+def fronzen_args(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        args_f = copy.deepcopy(args)
+        kwargs_f = copy.deepcopy(kwargs)
+        return func(*args_f, **kwargs_f)
+    return wrapper
+
+
+def func_hook(hook):
+    # 等于是增长函数调用链条
+    def decorated(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            # do something
+            return hook(func, *args, **kwargs)
+        return wrapper
+    return decorated
     
 
+    
