@@ -3,46 +3,24 @@
 import sys
 import os
 import traceback
-from functools import wraps
+from functools import wraps, partial
 import linecache
 import time
 import math
 import logging
 import inspect
 import cProfile
-import pprint
-import miscUtils
 from threading import Lock
-import cPickle
 import copy
+from .utils import backtrace_f, memorized_args_key, lineDumpFunc
 
 
 __all__ = ['immutableattr', 'safe_run', 'safe_run_dump', 'trace',
            'dump_args', 'dump_res', 'fronzen_args', 'delayRetry', 'invokerLog',
-           'methodWrap', 'except_dump',
-           'test_run', 'timecal', 'profileit', 'lineDump', 'btDump',
+           'methodWrap',
+           'test_run', 'timecal', 'profileit', 'lineDump',
+           'exceptionDump', 'btDump',
            'memorized', 'memorized_timeout']
-
-
-def _backtrace_f(f):
-    while f:
-        print f, f.f_code
-        f = f.f_back
-
-        
-def except_dump(func):
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        try:
-            return func(*args, **kwargs)
-        except Exception as e:
-            exc_type, exc_value, exc_traceback = sys.exc_info()
-            lines = traceback.format_exception(exc_type, exc_value, exc_traceback)
-            print ''.join('!! ' + line for line in lines)
-            _backtrace_f(sys._getframe())
-            print func, args, kwargs
-            raise e
-    return wrapper
 
 
 def profileit(func):
@@ -158,28 +136,12 @@ fib.cache = {0:0, 1:1}  # 用 fib.func_dict  存储数值
 """
 
 
-def _args_have_dict(*args):
-    return any(map(lambda x: isinstance(x, dict), args))
-        
-
-def _memorized_args_key(func, *args, **kwargs):
-    arg_names = func.func_code.co_varnames
-    arg_count = func.func_code.co_argcount
-    
-    arg_dict = {}
-    for i, arg in enumerate(args[:arg_count]):
-        arg_dict[arg_names[i]] = args[i]
-    arg_dict.update({"*args": args[arg_count:]})
-    arg_dict.update(**kwargs)
-    return cPickle.dumps(arg_dict)
-
-
 def memorized(func):
     save_res = {}
 
     @wraps(func)
     def wrapper(*args, **kwargs):
-        tuple_name = _memorized_args_key(func, *args, **kwargs)
+        tuple_name = memorized_args_key(func, *args, **kwargs)
         if tuple_name in save_res:
             return save_res[tuple_name]
         else:
@@ -194,7 +156,7 @@ def memorized_timeout(timeout):
         
         @wraps(func)
         def wrapper(*args, **kwargs):
-            tuple_name = _memorized_args_key(func, *args, **kwargs)
+            tuple_name = memorized_args_key(func, *args, **kwargs)
             if tuple_name in save_res and save_res[tuple_name]['timeout'] > time.time():
                 return save_res[tuple_name]['res']
             else:
@@ -263,98 +225,58 @@ def safe_run_dump(func):
         except:
             ex_type, ex, tb = sys.exc_info()
             traceback.print_tb(tb)
-            _backtrace_f(sys._getframe())
+            backtrace_f(sys._getframe())
             return None
     return wrapper
 
 
 def trace_when_error(func):
+    """ copy this function from  
+https://wiki.python.org/moin/PythonDecoratorLibrary#Line_Tracing_Individual_Functions
+ """
+    save_trace = []
+    
+    def globaltrace(frame, why, arg):
+        if why == "call":
+            return _dump
+        return None
+    
+    def _dump(frame, why, arg):
+        if why == "exception":
+            # record the file name and line number of every trace
+            import pdb
+            pdb.set_trace()
+        return _dump
+    
+    def wrapper(f):
+        @wraps(f)
+        def _f(*args, **kwds):
+            save_trace.append(sys.gettrace())
+            sys.settrace(globaltrace)
+            try:
+                return f(*args, **kwds)
+            finally:    
+                sys.settrace(save_trace[-1])
+        return _f
+    return wrapper
+
+
+def trace(func):  
     save_trace = []
     
     @wraps(func)
     def wrapper(*args, **kwargs):
         try:
-            res = func(*args, **kwargs)
-            return res
-        except:
             save_trace.append(sys.gettrace())
             import pdb
             pdb.set_trace()
+            return func(*args, **kwargs)
+        finally:
             sys.settrace(save_trace[-1])
     return wrapper
 
 
-def trace(func):
-    save_trace = []
-    
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        try:
-            save_trace.append(sys.gettrace())
-            import pdb
-            pdb.set_trace()
-            res = func(*args, **kwargs)
-            sys.settrace(save_trace[-1])
-            return res
-        except:
-            sys.settrace(save_trace[-1])
-    return wrapper
-
-
-def _filter_frame_dict(ddata):
-    from inspect import isfunction, ismethod, ismodule, isclass
-
-    no_private = lambda key: not key.startswith('_')  
-    no_function = lambda key: not isfunction(ddata[key])
-    no_method = lambda key: not ismethod(ddata[key])
-    no_module = lambda key: not ismodule(ddata[key])
-    no_class = lambda key: not isclass(ddata[key])
-    no_type = lambda key: not (type(ddata[key]) == type)
-    
-    no_ipython = lambda key: (key != 'In') and ( key != 'Out') \
-                         and (key != 'exit') and (key !='quit')  
-    
-    filter_list = [no_private, no_function, no_method, no_module,
-                   no_ipython, no_type]
-    
-    return {key: ddata[key] for key in
-            reduce(lambda r, x: filter(x, r), filter_list, ddata)}
-
-
-def _diff_dict(new, old):
-
-    _newkey_dict = {key: new[key] for key in (new.viewkeys() - old.viewkeys())}
-    _diff_dict = {key: new[key] for key in (new.viewkeys() & old.viewkeys())
-                  if new[key] != old[key]}
-    _diff_dict.update(_newkey_dict)
-    return _diff_dict
-
-
-def _lineDumpFunc():
-    def _print(ddata):
-        if len(ddata) is 0:
-            return
-        miscUtils.safe_do_with_info(pp.pprint, ddata)
-
-    _frame_dict = []
-    pp = pprint.PrettyPrinter(indent=4)
-    
-    def _func(frame):
-        f_locals, f_globals = _filter_frame_dict(frame.f_locals), _filter_frame_dict(frame.f_globals)
-
-        try:
-            _print(_diff_dict(f_globals, _frame_dict.pop()))
-            _print(_diff_dict(f_locals, _frame_dict.pop()))
-        except:
-            _print(f_locals)
-            _print(f_globals)
-            
-        _frame_dict.append(f_locals)
-        _frame_dict.append(f_globals)
-    return _func
-
-
-def btDump(procFrameFunc=_lineDumpFunc(), verbose=False):
+def btDump(procFrameFunc=lineDumpFunc(), verbose=False):
     def _detail_dump(f):
         while f:
             if verbose:
@@ -373,7 +295,7 @@ def btDump(procFrameFunc=_lineDumpFunc(), verbose=False):
     return decorated_func        
     
 
-def lineDump(procFrameFunc=_lineDumpFunc()):
+def lineDump(procFrameFunc=lineDumpFunc()):
     """ copy this function from  
 https://wiki.python.org/moin/PythonDecoratorLibrary#Line_Tracing_Individual_Functions
  """
@@ -399,7 +321,6 @@ https://wiki.python.org/moin/PythonDecoratorLibrary#Line_Tracing_Individual_Func
                                       lineno,
                                       linecache.getline(filename, lineno))
             procFrameFunc(frame)
-             
         return _dump
     
     def wrapper(f):
@@ -409,10 +330,47 @@ https://wiki.python.org/moin/PythonDecoratorLibrary#Line_Tracing_Individual_Func
         def _f(*args, **kwds):
             save_trace.append(sys.gettrace())
             sys.settrace(globaltrace)
-            result = f(*args, **kwds)
-            sys.settrace(save_trace[-1])
-            return result
+            try:
+                return f(*args, **kwds)
+            finally:    
+                sys.settrace(save_trace[-1])
+        return _f
+    return wrapper
 
+
+def exceptionDump(procFrameFunc=lineDumpFunc()):
+    """ copy this function from  
+https://wiki.python.org/moin/PythonDecoratorLibrary#Line_Tracing_Individual_Functions
+ """
+    save_trace = []
+    
+    def globaltrace(frame, why, arg):
+        if why == "call":
+            return _dump
+        return None
+    
+    def _dump(frame, why, arg):
+        if why == "exception":
+            # record the file name and line number of every trace
+            filename = frame.f_code.co_filename
+            lineno = frame.f_lineno
+            bname = os.path.basename(filename)
+            
+            print "{}({}): {}".format(bname,
+                                      lineno,
+                                      linecache.getline(filename, lineno))
+            procFrameFunc(frame)
+        return _dump
+    
+    def wrapper(f):
+        @wraps(f)
+        def _f(*args, **kwds):
+            save_trace.append(sys.gettrace())
+            sys.settrace(globaltrace)
+            try:
+                return f(*args, **kwds)
+            finally:    
+                sys.settrace(save_trace[-1])
         return _f
     return wrapper
 
