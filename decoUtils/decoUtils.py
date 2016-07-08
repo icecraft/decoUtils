@@ -3,7 +3,7 @@
 import sys
 import os
 import traceback
-from functools import wraps, partial
+from functools import wraps
 import linecache
 import time
 import math
@@ -17,10 +17,10 @@ from .utils import backtrace_f, memorized_args_key, lineDumpFunc
 
 __all__ = ['immutableattr', 'safe_run', 'safe_run_dump', 'trace',
            'dump_args', 'dump_res', 'fronzen_args', 'delayRetry', 'invokerLog',
-           'methodWrap',
+           'methodWrap', 'trace_when_error', 'trace_when_error_gen',
            'test_run', 'timecal', 'profileit', 'lineDump',
            'exceptionDump', 'btDump',
-           'memorized', 'memorized_timeout']
+           'memorized', 'memorized_timeout', 'invoking_warning']
 
 
 def profileit(func):
@@ -35,7 +35,7 @@ def profileit(func):
 
 # 重试若干次，如果还是失败。则直接 return 0，让 rq 清理这个任务
 # todo: 如果那样还是失败，则 log 出来
-# Attention: 暂时用不了，因为不知道如何将一个失败的任务塞到 rq 队列中。以及如何将错误日志 log 出来 
+# Attention: 暂时用不了，因为不知道如何将一个失败的任务塞到 rq 队列中。以及如何将错误日志 log 出来
 def redis_retry(tries=3):
     def _redis_retry(func):
         try_times = [tries]
@@ -247,21 +247,51 @@ https://wiki.python.org/moin/PythonDecoratorLibrary#Line_Tracing_Individual_Func
             import pdb
             pdb.set_trace()
         return _dump
-    
-    def wrapper(f):
-        @wraps(f)
-        def _f(*args, **kwds):
-            save_trace.append(sys.gettrace())
-            sys.settrace(globaltrace)
-            try:
-                return f(*args, **kwds)
-            finally:    
-                sys.settrace(save_trace[-1])
-        return _f
+
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        save_trace.append(sys.gettrace())
+        sys.settrace(globaltrace)
+        try:
+            return func(*args, **kwargs)
+        finally:
+            sys.settrace(save_trace[-1])
+
     return wrapper
 
 
-def trace(func):  
+def trace_when_error_gen(func):
+    """ copy this function from  
+https://wiki.python.org/moin/PythonDecoratorLibrary#Line_Tracing_Individual_Functions
+ """
+    save_trace = []
+    
+    def globaltrace(frame, why, arg):
+        if why == "call":
+            return _dump
+        return None
+    
+    def _dump(frame, why, arg):
+        if why == "exception":
+            # record the file name and line number of every trace
+            import pdb
+            pdb.set_trace()
+        return _dump
+
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        save_trace.append(sys.gettrace())
+        sys.settrace(globaltrace)
+        try:
+            for i in func(*args, **kwargs):
+                yield i
+        finally:
+            sys.settrace(save_trace[-1])
+
+    return wrapper
+
+
+def trace(func):
     save_trace = []
     
     @wraps(func)
@@ -290,13 +320,13 @@ def btDump(procFrameFunc=lineDumpFunc(), verbose=False):
         def wrapper(*args, **kwargs):
             f = sys._getframe()
             _detail_dump(f)
-            return func(*args, **kwargs)    
+            return func(*args, **kwargs)
         return wrapper
-    return decorated_func        
-    
+    return decorated_func
+
 
 def lineDump(procFrameFunc=lineDumpFunc()):
-    """ copy this function from  
+    """ copy this function from
 https://wiki.python.org/moin/PythonDecoratorLibrary#Line_Tracing_Individual_Functions
  """
     save_trace = []
@@ -332,7 +362,7 @@ https://wiki.python.org/moin/PythonDecoratorLibrary#Line_Tracing_Individual_Func
             sys.settrace(globaltrace)
             try:
                 return f(*args, **kwds)
-            finally:    
+            finally:
                 sys.settrace(save_trace[-1])
         return _f
     return wrapper
@@ -364,20 +394,20 @@ https://wiki.python.org/moin/PythonDecoratorLibrary#Line_Tracing_Individual_Func
     
     def wrapper(f):
         @wraps(f)
-        def _f(*args, **kwds):
+        def _f(*args, **kwargs):
             save_trace.append(sys.gettrace())
             sys.settrace(globaltrace)
             try:
-                return f(*args, **kwds)
-            finally:    
+                return f(*args, **kwargs)
+            finally:
                 sys.settrace(save_trace[-1])
         return _f
     return wrapper
 
 
 def dump_args(func):
-    """This decorator dumps out the arguments passed to 
-a function before calling it and this code was copy from 
+    """This decorator dumps out the arguments passed to
+a function before calling it and this code was copy from
 https://wiki.python.org/moin/PythonDecoratorLibrary#Line_Tracing_Individual_Functions
 """
     argnames = func.func_code.co_varnames[:func.func_code.co_argcount]
@@ -433,7 +463,7 @@ def delayRetry(tries, delay=3, backoff=2, defaultValue=None):
             while mtries > 0:
                 try:
                     return f(*args, **kwargs)   # Try again
-                except:    
+                except:
                     mtries -= 1          # consume an attempt
                     time.sleep(mdelay)   # wait...
                     mdelay *= backoff    # make future wait longer
@@ -494,7 +524,7 @@ def inc_one(func):
     return wrapper
 
 
-# before、after 装饰器可以用于测试用(测试环境的xx，修改测试参数) 
+# before、after 装饰器可以用于测试用(测试环境的xx，修改测试参数)
 
 def before(func):
     # 等于是增长函数调用链条
@@ -516,7 +546,7 @@ def after(func):
     return wrapper
 
 
-# 天然的几个切面：1，参数 2，返回值 
+# 天然的几个切面：1，参数 2，返回值
 
 
 def fronzen_args(func):
@@ -537,6 +567,15 @@ def func_hook(hook):
             return hook(func, *args, **kwargs)
         return wrapper
     return decorated
-    
 
     
+def invoking_warning(warnings):
+    def decorated(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            print warnings
+            return func(*args, **kwargs)
+        return wrapper
+    return decorated
+
+

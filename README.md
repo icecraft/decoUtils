@@ -27,6 +27,8 @@ collection of my python decorate code
 
 ## 待修改的问题
 1. dump_args 无法打印 *args, **kwargs 参数、dump_args 不能和 dump_res 配合使用  #done
+2. 许多的 decorator 对 generator 不起作用, trace_when_error_gen 不起作用
+
 
 
 
