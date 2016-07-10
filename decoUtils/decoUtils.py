@@ -13,6 +13,8 @@ import cProfile
 from threading import Lock
 import copy
 from .utils import backtrace_f, memorized_args_key, lineDumpFunc
+from IPython import embed
+import __builtin__
 
 
 __all__ = ['immutableattr', 'safe_run', 'safe_run_dump', 'trace',
@@ -244,8 +246,13 @@ https://wiki.python.org/moin/PythonDecoratorLibrary#Line_Tracing_Individual_Func
     def _dump(frame, why, arg):
         if why == "exception":
             # record the file name and line number of every trace
-            import pdb
-            pdb.set_trace()
+            try:
+                __builtin__.frame = frame
+                print "last executed: __builtin__.frame = frame"
+                embed()
+            finally:
+                del __builtin__.frame
+                
         return _dump
 
     @wraps(func)
