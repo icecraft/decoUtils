@@ -246,12 +246,8 @@ https://wiki.python.org/moin/PythonDecoratorLibrary#Line_Tracing_Individual_Func
     def _dump(frame, why, arg):
         if why == "exception":
             # record the file name and line number of every trace
-            try:
-                __builtin__.frame = frame
-                print "last executed: __builtin__.frame = frame"
-                embed()
-            finally:
-                del __builtin__.frame
+            import pdb
+            pdb.set_trace()
                 
         return _dump
 
