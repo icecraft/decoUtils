@@ -23,6 +23,7 @@ collection of my python decorate code
 1. 如何用装饰器或者从 aop 面向切面编程观点出发，实现一个具有 mock anything 的工具
 2. 如何用装饰器实现 event-driven programming (参考python 库 blinker )
 3. 考虑待增加功能 9 中所遇到的问题，考虑用 blinker 等事件驱动的方式解决
+4. 增加一个 类的装饰器，返回单例模式。
 
 
 ## 待修改的问题

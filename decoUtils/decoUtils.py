@@ -13,8 +13,6 @@ import cProfile
 from threading import Lock
 import copy
 from .utils import backtrace_f, memorized_args_key, lineDumpFunc
-from IPython import embed
-import __builtin__
 
 
 __all__ = ['immutableattr', 'safe_run', 'safe_run_dump', 'trace',
@@ -515,7 +513,17 @@ def methodWrap(wrapFunc):
         return CustomAttr(cls, wrapFunc)
     return decorator
 
+
+def singleton(class_):
+    instances = {}
     
+    def getinstance(*args, **kwargs):
+        if class_ not in instances:
+            instances[class_] = class_(*args, **kwargs)
+            return instances[class_]
+    return getinstance
+
+
 # decos
 
 def inc_one(func):
