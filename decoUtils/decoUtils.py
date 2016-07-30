@@ -33,24 +33,6 @@ def profileit(func):
     return wrapper
 
 
-# 重试若干次，如果还是失败。则直接 return 0，让 rq 清理这个任务
-# todo: 如果那样还是失败，则 log 出来
-# Attention: 暂时用不了，因为不知道如何将一个失败的任务塞到 rq 队列中。以及如何将错误日志 log 出来
-def redis_retry(tries=3):
-    def _redis_retry(func):
-        try_times = [tries]
-        
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            if try_times[-1] > 0:
-                try_times[-1] -= 1
-                return func(*args, **kwargs)
-            else:
-                return 0
-        return wrapper
-    return _redis_retry
-
-
 def synchronized(lock):
     '''Synchronization decorator. copy from
 https://wiki.python.org/moin/PythonDecoratorLibrary'''
@@ -136,20 +118,6 @@ fib.cache = {0:0, 1:1}  # 用 fib.func_dict  存储数值
 """
 
 
-def memorized(func):
-    save_res = {}
-
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        tuple_name = memorized_args_key(func, *args, **kwargs)
-        if tuple_name in save_res:
-            return save_res[tuple_name]
-        else:
-            save_res[tuple_name] = value = func(*args, **kwargs)
-            return value
-    return wrapper
-
-
 def memorized_timeout(timeout):
     def memorized(func):
         save_res = {}
@@ -167,6 +135,9 @@ def memorized_timeout(timeout):
                 return value
         return wrapper
     return memorized
+
+
+memorized = memorized_timeout(7200)
 
 
 def timecal(func):
@@ -589,4 +560,21 @@ def invoking_warning(warnings):
         return wrapper
     return decorated
 
+
+def singleton(cls):
+    ''' Use class as singleton. '''
+    __new_original__ = cls.__new__
+
+    @wraps(cls.__new__)
+    def singleton_new(cls, *args, **kw):
+        it =  cls.__dict__.get('__it__')
+        if it is not None:
+            return it
+
+        cls.__it__ = it = __new_original__(cls, *args, **kw)
+        return it
+
+    setattr(cls, '__new__', staticmethod(singleton_new))
+
+    return cls
 
