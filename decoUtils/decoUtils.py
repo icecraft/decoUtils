@@ -20,7 +20,7 @@ __all__ = ['immutableattr', 'safe_run', 'safe_run_dump', 'trace',
            'dump_args', 'dump_res', 'fronzen_args', 'delayRetry', 'invokerLog',
            'methodWrap', 'trace_when_error', 'trace_when_error_gen',
            'test_run', 'timecal', 'profileit', 'lineDump',
-           'exceptionDump', 'btDump',
+           'exceptionDump', 'btDump', 'invokerLog', 'methodWrap',
            'memorized', 'memorized_timeout', 'invoking_warning']
 
 
@@ -459,7 +459,7 @@ def invokerLog(func):
     return wrap
 
 
-class CustomAttr:
+class CustomAttr(object):
     def __init__(self, obj, wrapFunc=invokerLog):
         self.attr = "a custom function attribute"
         self.obj = obj
