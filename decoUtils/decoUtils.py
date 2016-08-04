@@ -12,6 +12,7 @@ import inspect
 import cProfile
 from threading import Lock
 import copy
+import warnings
 from .utils import backtrace_f, memorized_args_key, lineDumpFunc
 
 
@@ -173,6 +174,8 @@ def immutableattr(func):
             if len(cache) == 0:
                 cache.append(func(*args, **kwargs))
                 return cache[-1]
+            warnings.warn('immutableattr! for: %s' % str(func))
+                
         return wrapper
                                         
     
@@ -483,16 +486,6 @@ def methodWrap(wrapFunc):
     def decorator(cls):
         return CustomAttr(cls, wrapFunc)
     return decorator
-
-
-def singleton(class_):
-    instances = {}
-    
-    def getinstance(*args, **kwargs):
-        if class_ not in instances:
-            instances[class_] = class_(*args, **kwargs)
-            return instances[class_]
-    return getinstance
 
 
 # decos
