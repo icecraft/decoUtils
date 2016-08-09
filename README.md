@@ -24,6 +24,7 @@ collection of my python decorate code
 2. 如何用装饰器实现 event-driven programming (参考python 库 blinker )
 3. 考虑待增加功能 9 中所遇到的问题，考虑用 blinker 等事件驱动的方式解决
 4. 增加一个 类的装饰器，返回单例模式。 #done
+5. 有默认参数的函数，需要兼容不调用参数或调用参数的做法（参考 fabric decorator.py 中的做法） 
 
 
 ## 待修改的问题
